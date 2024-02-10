@@ -3,7 +3,7 @@ import glob
 import copy
 from transformers import SegformerForSemanticSegmentation
 from torchvision.transforms import ColorJitter
-from transformers import SegformerImageProcessor
+from transformers import SgegformerImageProcessor
 from transformers import TrainingArguments
 import torch
 from torch import nn
