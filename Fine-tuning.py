@@ -1,21 +1,14 @@
-# from transformers import pipeline
-# from PIL import Image
-# import requests
-#
-# # url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/segmentation_input.jpg"
-# img_path = r"car-segmentation/images/003.png"
-# image = Image.open(img_path)
-# # image.show()
-#
-# semantic_segmentation = pipeline("image-segmentation", "nvidia/segformer-b1-finetuned-cityscapes-1024-1024")
-# results = semantic_segmentation(image)
-# print(results)
-# results[-2]["mask"].show()
 import datasets
 import glob
-from PIL import Image
-import torchvision.transforms as transforms
-import numpy as np
+import copy
+from transformers import SegformerForSemanticSegmentation
+from torchvision.transforms import ColorJitter
+from transformers import SegformerImageProcessor
+from transformers import TrainingArguments
+import torch
+from torch import nn
+import evaluate
+from transformers import Trainer
 
 
 IMAGES = glob.glob(r"car-segmentation\images\*.png")
@@ -27,7 +20,7 @@ ds = dataset.shuffle(seed=1)
 ds = ds.train_test_split(test_size=0.2)
 train_ds = ds["train"]
 test_ds = ds["test"]
-import copy
+
 for_inference = copy.deepcopy(ds["test"])
 
 
@@ -40,7 +33,7 @@ id2label = {id: labels[id] for id in range(len(labels))}
 label2id = {label: id for id, label in id2label.items()}
 num_labels = len(labels)
 
-from transformers import SegformerForSemanticSegmentation
+
 
 pretrained_model_name = "nvidia/mit-b0"
 model = SegformerForSemanticSegmentation.from_pretrained(
@@ -49,8 +42,7 @@ model = SegformerForSemanticSegmentation.from_pretrained(
     label2id=label2id
 )
 
-from torchvision.transforms import ColorJitter
-from transformers import SegformerImageProcessor
+
 
 processor = SegformerImageProcessor()
 jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
@@ -79,7 +71,6 @@ train_ds.set_transform(train_transforms)
 test_ds.set_transform(val_transforms)
 # print("abc", train_ds['label'])
 
-from transformers import TrainingArguments
 
 epochs = 5
 lr = 0.00006
@@ -103,9 +94,7 @@ training_args = TrainingArguments(
     load_best_model_at_end=True
 )
 
-import torch
-from torch import nn
-import evaluate
+
 
 metric = evaluate.load("mean_iou")
 
@@ -143,52 +132,53 @@ def compute_metrics(eval_pred):
         return metrics
 
 
-# from transformers import Trainer
 #
-# trainer = Trainer(
-#     model=model,
-#     args=training_args,
-#     train_dataset=train_ds,
-#     eval_dataset=test_ds,
-#     compute_metrics=compute_metrics,
-# )
 #
-# trainer.train()
-# model.save_pretrained("segformer_fine_tune", from_pt=True)
-# processor = SegformerImageProcessor.from_pretrained("nvidia/segformer-b0-finetuned-ade-512-512")
-model = SegformerForSemanticSegmentation.from_pretrained("segformer_fine_tune")
-print("----------------------------------")
-image = for_inference[0]['pixel_values']
-gt_seg = for_inference[0]['label']
-# image = test_ds[0]['pixel_values']
-# gt_seg = test_ds[0]['label']
-# print(np.unique(np.array(image)))
-print(np.array(image).shape)
-
-# print(processor(images=image, return_tensors="pt"))
-# image = transforms.ToTensor()(image)
-# print(torch.unique(image))
-# print(image)
-from torch import nn
-
-inputs = processor(images=image, return_tensors="pt")
-print("-----")
-outputs = model(**inputs)
-logits = outputs.logits  # shape (batch_size, num_labels, height/4, width/4)
-# First, rescale logits to original image size
-upsampled_logits = nn.functional.interpolate(
-    logits,
-    size=np.array(image).shape[:2], # (height, width)
-    mode='bilinear',
-    align_corners=False
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_ds,
+    eval_dataset=test_ds,
+    compute_metrics=compute_metrics,
 )
 
-# Second, apply argmax on the class dimension
-pred_seg = upsampled_logits.argmax(dim=1)[0]
-print(torch.unique(pred_seg))
-import matplotlib.pyplot as plt
-plt.subplot(1, 2, 1)
-plt.imshow(pred_seg)
-plt.subplot(1, 2, 2)
-plt.imshow(np.array(gt_seg))
-plt.show()
+trainer.train()
+model.save_pretrained("segformer_fine_tune", from_pt=True)
+
+
+# processor = SegformerImageProcessor.from_pretrained("nvidia/segformer-b0-finetuned-ade-512-512")
+# model = SegformerForSemanticSegmentation.from_pretrained("segformer_fine_tune")
+# print("----------------------------------")
+# image = for_inference[0]['pixel_values']
+# gt_seg = for_inference[0]['label']
+# # image = test_ds[0]['pixel_values']
+# # gt_seg = test_ds[0]['label']
+# # print(np.unique(np.array(image)))
+# print(np.array(image).shape)
+#
+# # print(processor(images=image, return_tensors="pt"))
+# # image = transforms.ToTensor()(image)
+# # print(torch.unique(image))
+# # print(image)
+#
+# inputs = processor(images=image, return_tensors="pt")
+# print("-----")
+# outputs = model(**inputs)
+# logits = outputs.logits  # shape (batch_size, num_labels, height/4, width/4)
+# # First, rescale logits to original image size
+# upsampled_logits = nn.functional.interpolate(
+#     logits,
+#     size=np.array(image).shape[:2], # (height, width)
+#     mode='bilinear',
+#     align_corners=False
+# )
+#
+# # Second, apply argmax on the class dimension
+# pred_seg = upsampled_logits.argmax(dim=1)[0]
+# print(torch.unique(pred_seg))
+#
+# plt.subplot(1, 2, 1)
+# plt.imshow(pred_seg)
+# plt.subplot(1, 2, 2)
+# plt.imshow(np.array(gt_seg))
+# plt.show()
