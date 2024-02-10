@@ -1,12 +1,20 @@
-from datasets import load_dataset
-import numpy as np
-from datasets import load_dataset
 import json
 from huggingface_hub import cached_download, hf_hub_url
 from transformers import AutoImageProcessor
 from PIL import Image
 import datasets
 import glob
+import copy
+import torch
+from torch import nn
+import evaluate
+from torchvision.transforms import ColorJitter
+import numpy as np
+from transformers import AutoModelForSemanticSegmentation, TrainingArguments, Trainer
+from peft import LoraConfig, get_peft_model
+
+
+
 
 IMAGES = glob.glob(r"car-segmentation\images\*.png")
 SEG_MAPS = glob.glob("car-segmentation\masks\*.png")
@@ -17,6 +25,7 @@ ds = dataset.shuffle(seed=1)
 ds = ds.train_test_split(test_size=0.2)
 train_ds = ds["train"]
 test_ds = ds["test"]
+for_inference = copy.deepcopy(ds["test"])
 # print(np.array(train_ds['image'][0]).shape)
 #
 #
@@ -34,10 +43,10 @@ num_labels = len(id2label)
 
 checkpoint = "nvidia/mit-b0"
 image_processor = AutoImageProcessor.from_pretrained(checkpoint, do_reduce_labels=True)
-from torchvision.transforms import ColorJitter
+
 
 jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
-import numpy as np
+
 
 
 def handle_grayscale_image(image):
@@ -70,9 +79,7 @@ def val_transforms(example_batch):
 train_ds.set_transform(train_transforms)
 test_ds.set_transform(val_transforms)
 
-import torch
-from torch import nn
-import evaluate
+
 
 metric = evaluate.load("mean_iou")
 
@@ -121,14 +128,14 @@ def print_trainable_parameters(model):
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.2f}"
     )
 
-from transformers import AutoModelForSemanticSegmentation, TrainingArguments, Trainer
+
 
 model = AutoModelForSemanticSegmentation.from_pretrained(
     checkpoint, id2label=id2label, label2id=label2id, ignore_mismatched_sizes=True
 )
 print_trainable_parameters(model)
 
-from peft import LoraConfig, get_peft_model
+
 
 config = LoraConfig(
     r=32,
@@ -147,7 +154,7 @@ print_trainable_parameters(lora_model)
 model_name = checkpoint.split("/")[-1]
 
 training_args = TrainingArguments(
-    output_dir=f"{model_name}-scene-parse-150-lora",
+    output_dir=f"{model_name}-scene-parse-lora",
     learning_rate=5e-4,
     num_train_epochs=3,
     per_device_train_batch_size=4,
@@ -157,7 +164,7 @@ training_args = TrainingArguments(
     save_strategy="epoch",
     logging_steps=5,
     remove_unused_columns=False,
-    label_names=["labels"],
+    label_names=["labels"]
 )
 
 trainer = Trainer(
@@ -171,5 +178,10 @@ trainer = Trainer(
 trainer.train()
 
 
-model_id = "segformer-lora"
-lora_model.save_pretrained(model_id)
+model_id = "segformer-lora2"
+trainer.model.save_pretrained(model_id)
+# lora_model.save_pretrained(model_id)
+
+image = for_inference[0]["pixel_values"]
+encoding = image_processor(image.convert("RGB"), return_tensors="pt")
+print(lora_model(encoding.pixel_values))
